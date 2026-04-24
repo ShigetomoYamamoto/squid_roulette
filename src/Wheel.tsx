@@ -154,7 +154,7 @@ export function Wheel({ items, palette, motif, angle, winner, justLanded, onHubC
               <circle key={i} cx={x} cy={y} r={1.5} fill={palette.ink} opacity="0.4" />
             )
           })}
-          {/* A+ inverted: white symbols w/ soft shadow */}
+          {/* Engraved symbols / numbers (highlight below, dark ink on top) */}
           {segments.map((s, i) => {
             const symbolY = cy - r * 0.5
             const symbolR = 13
@@ -163,32 +163,47 @@ export function Wheel({ items, palette, motif, angle, winner, justLanded, onHubC
               <g key={`sym-${i}`} transform={`rotate(${s.mid} ${cx} ${cy})`}>
                 {motif === 'symbol' && (
                   <g>
-                    <g transform="translate(0,1)" opacity="0.35">
-                      {renderSymbol(kind, cx, symbolY, symbolR, 'rgba(0,0,0,0.6)')}
+                    <g transform="translate(0,0.8)">
+                      {renderSymbol(kind, cx, symbolY, symbolR, 'rgba(255,255,255,0.35)')}
                     </g>
-                    <g>
-                      {renderSymbol(kind, cx, symbolY, symbolR, 'rgba(255,255,255,0.95)')}
+                    <g opacity="0.9">
+                      {renderSymbol(kind, cx, symbolY, symbolR, 'rgba(0,0,0,0.55)')}
                     </g>
                   </g>
                 )}
                 {motif === 'number' && (
-                  <text
-                    x={cx}
-                    y={symbolY + 5}
-                    textAnchor="middle"
-                    fontFamily="'JetBrains Mono', monospace"
-                    fontSize="18"
-                    fontWeight="700"
-                    fill="rgba(255,255,255,0.95)"
-                    style={{ letterSpacing: '0.04em' }}
-                  >
-                    {String(i + 1).padStart(3, '0')}
-                  </text>
+                  <g>
+                    <text
+                      x={cx}
+                      y={symbolY + 5 + 0.8}
+                      textAnchor="middle"
+                      fontFamily="'JetBrains Mono', monospace"
+                      fontSize="18"
+                      fontWeight="700"
+                      fill="rgba(255,255,255,0.35)"
+                      style={{ letterSpacing: '0.04em' }}
+                    >
+                      {String(i + 1).padStart(3, '0')}
+                    </text>
+                    <text
+                      x={cx}
+                      y={symbolY + 5}
+                      textAnchor="middle"
+                      fontFamily="'JetBrains Mono', monospace"
+                      fontSize="18"
+                      fontWeight="700"
+                      fill="rgba(0,0,0,0.55)"
+                      opacity="0.9"
+                      style={{ letterSpacing: '0.04em' }}
+                    >
+                      {String(i + 1).padStart(3, '0')}
+                    </text>
+                  </g>
                 )}
               </g>
             )
           })}
-          {/* Engraved vertical labels */}
+          {/* White vertical labels on top of symbols */}
           {segments.map((s, i) => {
             const labelText = items[i] ?? ''
             const chars = [...labelText]
@@ -201,32 +216,19 @@ export function Wheel({ items, palette, motif, angle, winner, justLanded, onHubC
             return (
               <g key={`lbl-${i}`} transform={`rotate(${s.mid} ${cx} ${cy})`}>
                 {chars.map((ch, ci) => (
-                  <g key={ci}>
-                    <text
-                      x={cx}
-                      y={topY + ci * charSpacing + 0.8}
-                      textAnchor="middle"
-                      dominantBaseline="middle"
-                      fontFamily="'Noto Sans JP', sans-serif"
-                      fontSize={fontSize}
-                      fontWeight="700"
-                      fill="rgba(255,255,255,0.35)"
-                    >
-                      {ch}
-                    </text>
-                    <text
-                      x={cx}
-                      y={topY + ci * charSpacing}
-                      textAnchor="middle"
-                      dominantBaseline="middle"
-                      fontFamily="'Noto Sans JP', sans-serif"
-                      fontSize={fontSize}
-                      fontWeight="700"
-                      fill="rgba(0,0,0,0.62)"
-                    >
-                      {ch}
-                    </text>
-                  </g>
+                  <text
+                    key={ci}
+                    x={cx}
+                    y={topY + ci * charSpacing}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fontFamily="'Noto Sans JP', sans-serif"
+                    fontSize={fontSize}
+                    fontWeight="700"
+                    fill="#FFFFFF"
+                  >
+                    {ch}
+                  </text>
                 ))}
               </g>
             )
