@@ -1,6 +1,6 @@
 import type { Palette } from './palettes'
 
-export type Motif = 'symbol' | 'number'
+export type Motif = 'symbol' | 'number' | 'none'
 
 interface WheelProps {
   items: string[]

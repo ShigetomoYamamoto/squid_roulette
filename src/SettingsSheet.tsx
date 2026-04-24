@@ -157,8 +157,9 @@ export function SettingsSheet({
             P={P}
             value={motif}
             options={[
-              { v: 'symbol', label: '○△□ 記号' },
-              { v: 'number', label: '001 番号' },
+              { v: 'symbol', label: '○△□' },
+              { v: 'number', label: '001' },
+              { v: 'none', label: 'なし' },
             ]}
             onChange={setMotif}
           />
