@@ -33,11 +33,18 @@ argument-hint: "[--vibing] <目的またはタスク/Issue>"
    `rules/loop-safety.md` を参照（本コマンドに定義実体は置かない・ADR-015）。`--isolation`（任意の
    安全ダイヤル・既定 none）も受理する。
 
-## ステップ 2: モード判定
+## ステップ 2: モード判定・サイジング
 
 入力が自由形式の目標 → full-auto / 具体タスク・Issue → support。autorun-flow.md のモード表から
 start / goal を取得する。`--vibing` は第3モードではなく、full-auto / support どちらにも重畳する
 直交フラグ（ADR-015）。
+
+あわせて、ここが**唯一のサイジング判断点**(C:些末→そのまま実装して省略を明記 / B:ミニ→述語を
+その場で1〜2個宣言してtdd+verifyだけ / A:フル→フェーズ表どおり、A内でも中小はインライン・
+大規模は `workflows/large-scope-execute.js`)。判定基準・詳細は `.claude/docs/autorun-flow.md`
+「Sizing」を正とする(本コマンドに再掲しない)。C/Bと判定した場合はステップ3以降のフェーズ表を
+フルには回さず、この場でサイジング結果どおりの軽量経路を実行する(入口は1つ・判断者は1人・
+ADR-014・ADR-025)。
 
 ## ステップ 3: RUN_STATE 初期化（会話内に可視化）
 
@@ -52,7 +59,7 @@ current_phase が goal_phase を越えるまで繰り返す:
 
 1. `.claude/docs/autorun-flow.md` を読み、current_phase の行を引く。
 2. 実行部品を起動する（GOAL 再掲・直前フェーズ成果・SCOPE をプリアンブルで明示的に渡す）。
-   - **tdd** フェーズは `skills/loop-engineering/`（ミクロ層）に委譲（渡した SCOPE を採用させ、STEP0 の A/B/C 再判定はさせない＝判断者1人。`.claude/docs/autorun-flow.md`「Scope handoff to the tdd phase」）。
+   - **tdd** フェーズは `agents/tdd-guide.md`(述語表は `agents/planner.md` 供給、大規模は `workflows/large-scope-execute.js`)に委譲（渡した SCOPE を採用させ、A/B/C の再判定はさせない＝判断者1人。`.claude/docs/autorun-flow.md`「Scope handoff to the tdd phase」）。
    - **verify** フェーズは `/review-loop` に委譲。
 3. success_test を**機械的に実行**（Bash、結果を transcript 出力。自己申告で代替しない）。
 4. 偽なら: フェーズ内リトライ（tdd/verify は内部ループ、build エラーは build-error-resolver）。
@@ -63,6 +70,7 @@ current_phase が goal_phase を越えるまで繰り返す:
    - **auto** — 確認を取らず next へ自動遷移。commit フェーズは包括承認のもと自動（メッセージは提示）。
    - **gate** — 停止プロトコル（関門名・成果サマリ・次に進むと何が起きるか・承認/修正/中止を提示し
      **能動的にターン終了**）。承認後のみ next。承認は gates_passed に記録し次に持ち越さない。
+     - **ゲートの確認画面（ADR-032・ADR-033）** — `review-html` スキルの前提チェック（手元の対話セッション）が通るときは、requirements ゲート（requirements プロファイル）と design ゲート（design プロファイル）の成果サマリの提示に `review-html` スキルを使う（ブラウザの確認画面で判断・コメントを回収する）。承認は今までどおりチャットでのユーザーの返事だけで決まり、確認画面からの送信は承認として扱わない。前提チェックが通らないとき（SDK 経由の自動実行など）は、今までどおりチャットで提示する。
 6. **design スキップ** — autorun-flow.md のスキップ条件（requirements 成果の `design_needed` で判定）を
    満たせば design gate ごとスキップして plan へ。vibing も同じ `design_needed` を使う（新基準は設けない）。
 7. **ゴールドリフト検知** — 各フェーズ境界で (a) 構造ゴール=goal_phase 到達、(b) 内容ゴール=確定要件
@@ -73,7 +81,7 @@ current_phase が goal_phase を越えるまで繰り返す:
    で green を機械確認する。**green → 前進。赤 / タイムアウト / run 検出不能 → STOP・報告（fail-safe=停止）**。
    これは「手続き＋機械チェック」で担保し物理層（hook）は無い（過大表示しない）。**vibing でもこの機械確認は
    外れない**（vibing が外すのは PR 承認の事前確認＝人間ゲートだけ。正は `.claude/docs/autorun-flow.md`「Remote CI
-   green は pr の機械 success_test 成分」、`docs/adr/018-remote-ci-as-done-condition.md`）。
+   green は pr の機械 success_test 成分」、claude-core の `docs/adr/018-remote-ci-as-done-condition.md`）。
 
 ## ステップ 5: 停止と報告
 
@@ -97,7 +105,7 @@ current_phase が goal_phase を越えるまで繰り返す:
 
 - `.claude/docs/autorun-flow.md` — フロー定義（本コマンドが解釈する正）
 - `rules/loop-safety.md` — 安全規律の正本
-- `skills/loop-engineering/SKILL.md` — tdd フェーズの実装部品（ミクロ層）
-- `docs/adr/007-autonomous-loop-execution.md` / `docs/adr/008-orchestration-declarative-flow.md` — 設計決定
-- `docs/adr/015-vibing-mode.md` — `--vibing` フラグと kind 降格（`resolve_kind`）の決定
-- `docs/adr/018-remote-ci-as-done-condition.md` — remote CI green を pr の機械 success_test 成分とする決定
+- `agents/tdd-guide.md` — tdd フェーズの実装部品（RED→GREEN）／`agents/planner.md` — 述語表の起草者／`workflows/large-scope-execute.js` — 大規模時の実行経路
+- claude-core の `docs/adr/007-autonomous-loop-execution.md` / claude-core の `docs/adr/008-orchestration-declarative-flow.md` — 設計決定
+- claude-core の `docs/adr/015-vibing-mode.md` — `--vibing` フラグと kind 降格（`resolve_kind`）の決定
+- claude-core の `docs/adr/018-remote-ci-as-done-condition.md` — remote CI green を pr の機械 success_test 成分とする決定

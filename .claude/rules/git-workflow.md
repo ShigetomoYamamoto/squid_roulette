@@ -10,7 +10,7 @@ These rules apply whenever any agent performs git operations — not just when `
 - Never stage `.env`, credential files, or any file matching `*.key`, `*.pem`, `*.secret`.
 - If changes span multiple unrelated purposes, split into separate commits.
 - Do not push after committing — the user pushes manually.
-- **Autonomous-run exception:** during `/autorun`, the user grants a one-time blanket approval for auto-commits at startup; per-commit approval is then waived (the message is still shown in the transcript each time). Without that approval, commit becomes a gate. See `docs/adr/008-orchestration-declarative-flow.md`.
+- **Autonomous-run exception:** during `/autorun`, the user grants a one-time blanket approval for auto-commits at startup; per-commit approval is then waived (the message is still shown in the transcript each time). Without that approval, commit becomes a gate. See claude-core の `docs/adr/008-orchestration-declarative-flow.md`.
 
 ### Branches
 - **Always branch from `develop`.** Pull the latest `develop` before creating any branch.
@@ -26,17 +26,34 @@ These rules apply whenever any agent performs git operations — not just when `
   develop-base rule, and it applies solely to vibing; normal usage and plain `/autorun`
   keep `develop` as base unchanged.
 
+### Issue Progress Labels
+- **Declare Issue progress with a label; never guess it.** `workops progress estimate` reads the `progress:` label as its primary progress signal.
+- Labels and meaning:
+  - No label = not started (falls back to the status-based estimate)
+  - `progress: started` = work begun (a working branch was created) → 25%
+  - `progress: implementing` = implementation in progress → 50%
+  - `progress: review` = PR opened, awaiting review → 80%
+- **Exactly one at a time.** When adding the next label, remove the previous one.
+- Transitions — the agent that performs the step moves the label:
+  - Created a working branch for the Issue → add `progress: started`
+  - Began implementation → replace with `progress: implementing`
+  - Opened a PR that closes the Issue → replace with `progress: review`
+  - PR merged → remove every `progress:` label (the Issue closes automatically via `Closes #N`)
+  - Work interrupted or put on hold → remove every `progress:` label
+- **Scope: `ShigetomoYamamoto/*` repositories only.** Never create or apply these labels in `crien-inc/*` (labels are visible to everyone in an organization repository, and the team has not yet agreed to this convention).
+- If the target repository does not have the label, skip that step and report it. Do not create the label as part of this procedure.
+
 ---
 
 ## Reference
 
-Format details (Conventional Commits type table / branch naming conventions / PR description template) are documented in `~/.claude/skills/git-workflow/SKILL.md`. Refer to it when generating commit messages, branch names, or PR descriptions.
+Format details (Conventional Commits type table / branch naming conventions / PR description template) are documented in `.claude/skills/git-workflow/SKILL.md`. Refer to it when generating commit messages, branch names, or PR descriptions.
 
-## コマンドの所在（公式委譲・[ADR-012](../docs/adr/012-official-plugins-for-git-review-security.md)）
+## コマンドの所在（公式委譲・[ADR-012](https://github.com/ShigetomoYamamoto/claude-core/blob/main/docs/adr/012-official-plugins-for-git-review-security.md)）
 
 - **コミット** → 公式 `/commit-commands:commit`（コミットのみ・push しない）。規約準拠は `commit-msg-convention.py` hook が機械的に担保。
 - **マージ済みローカルブランチ掃除** → 公式 `/commit-commands:clean_gone`。
 - **ブランチ作成** → 自作 `/create-branch`（develop 起点＋命名規約。公式に同等品なし）。
 - **PR 作成** → 自作 `/create-pr`（develop ベース＋テンプレ＋承認）。公式 `/commit-commands:commit-push-pr` は `--base` を指定せず `pr-base-checker.py`（develop 強制）に弾かれ、かつ無確認 push/PR になるため採用しない。
 - 上記すべてに対し、保護ブランチへの commit/push と非 develop への PR は hooks が決定的にブロックする（どのコマンド経由でも有効）。
-- **自走/委譲時にメインが思考ティア(Opus/Fable)へエスカレーション中で VCS を直接実行できない場合(opus-execution-guard)** → `git-runner` サブエージェント(Sonnet)へ委譲。規約は hooks が担保し、コマンドの正(`/create-branch`・`/create-pr`・`/commit-commands:commit`)は不変。
+- **メインループは VCS を直接実行できない(`main-loop-execution-guard` がモデルを問わずブロックする・ADR-026)** → `git-runner` サブエージェント(Sonnet)へ委譲する(`run_in_background: false` を指定)。規約は hooks が担保し、コマンドの正(`/create-branch`・`/create-pr`・`/commit-commands:commit`)は不変。

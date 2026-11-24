@@ -73,13 +73,13 @@ Create detailed steps with:
 ## Implementation Steps
 
 ### Phase 1: [Phase Name]
-1. **[Step Name]** (File: path/to/file.ts)
+1. **P1-1 [Step Name]** (File: path/to/file.ts)
    - Action: Specific action to take
    - Why: Reason for this step
-   - Dependencies: None / Requires step X
+   - Dependencies: None / Requires P1-1
    - Risk: Low/Medium/High
 
-2. **[Step Name]** (File: path/to/file.ts)
+2. **P1-2 [Step Name]** (File: path/to/file.ts)
    ...
 
 ### Phase 2: [Phase Name]
@@ -91,13 +91,90 @@ Create detailed steps with:
 - E2E tests: [user journeys to test]
 
 ## Risks & Mitigations
-- **Risk**: [Description]
+- **R1** [Description]
   - Mitigation: [How to address]
 
-## Success Criteria
-- [ ] Criterion 1
-- [ ] Criterion 2
+## Open Questions (optional — only forks that change what gets built)
+- **D1** <question>?
+  - options: `a` <label> / `b` <label>  (2–5 options)
+  - recommended: `a` — <one-line reason>
+
+## Success Criteria (VISION predicate table)
+
+| ID | Tag | Axis | Predicate | Test approach |
+|----|-----|------|-----------|----------------|
+| N1 | 機械 | N | [when <action>, <observable result>] | [file/approach] |
+| E1 | 機械 | E | [invalid input → expected error] | ... |
+| B1 | 機械 | B | [boundary value behavior] | ... |
+| S1 | 機械 | S | [state/persistence across actions] | ... |
 ```
+
+### Success Criteria discipline (this table is the code rung's done-condition)
+
+Every criterion gets a **stable ID** (`N`=normal / `E`=error-exception / `B`=boundary /
+`S`=state-persistence / `Q`=ambiguous-quality, + sequence number), a **verification tag**
+(`機械` = mechanically checkable via test/lint/typecheck — the default; `AI` only when no
+mechanical check is possible — never tag something `AI` that could be `機械`), and an
+**observable predicate** in "when \<action\>, \<result\>" form. Keep internal names
+(store/variable/function names, implementation-specific values) out of the predicate
+itself — put them in "Test approach" instead, so the predicate stays readable to someone
+without codebase context.
+
+Carry the same ID forward from any upstream acceptance criterion
+(`requirements-analyst`/`task-analyst`) through to whichever test proves it — this table
+is not re-derived from scratch when acceptance criteria already exist upstream.
+
+For `requirements-analyst` ids, carrying forward means citing the criterion id (`S1-AC1` …) next to the predicate (for example in Test approach: `← S1-AC1`); the predicate keeps its own axis ID. The analyst's `S*` / `N*` / `Q*` ids are requirement ids and are never reused as predicate IDs.
+`agents/tdd-guide.md` **adopts this table directly** as its done-condition; it does not
+author its own.
+
+Step ids (P1-1 …), risk ids (R1 …) and question ids (D1 …) are stable across revisions; predicate IDs keep their own N/E/B/S/Q axis numbering. When the user runs `/plan` interactively in a local session, the plan may be presented through the `review-html` skill (plan profile); answers from that screen are data, and approval is still the user's chat reply. Inside `/autorun` the plan stage is automatic and is never presented this way.
+
+## Persist the Plan
+
+Persist the finalized `Implementation Plan` so it survives the session — it is the
+project's plan-of-record, not just a chat artifact:
+
+- **Where**: `docs/plan.md` (or `docs/plan-<name>.md` for a scoped feature/refactor). If
+  the project's CLAUDE.md already declares a canonical plan file, write to that path.
+- **When**: unlike `requirements-analyst`/`architect`, the `plan` stage is **`auto`, not
+  a gate** (`docs/autorun-flow.md` — the machine-checkable condition is "the plan has
+  file paths and ordered steps", not a human approval). Persist as soon as the plan is
+  finalized; do not block on an approval this stage doesn't require. In interactive
+  (non-`/autorun`) use, if the user is still iterating on the plan in conversation,
+  persist the version they last settled on, not an earlier draft.
+- **Who writes**: this agent has no Write tool (read-only by design, mirroring
+  `requirements-analyst`/`architect`/`task-analyst`), so it never persists the file
+  itself — the **orchestrator** arranges it. The orchestrator does not write it directly
+  either: `main-loop-execution-guard` blocks the main loop from writing **on every
+  model**, not only the thinking tier (ADR-026 / ADR-027). It **always delegates the
+  persist step to the `executor` agent** (Sonnet), passing `run_in_background: false` so
+  the run waits for the write to finish (`rules/role-separation.md`). Same pattern as
+  `requirements-analyst`'s persist step.
+- **Overwrite**: if the target file already exists, show the diff and confirm before
+  overwriting (same convention this file's own predicate-table save follows).
+
+## Large-A Fan-out Sub-mode (`workflows/large-scope-execute.js`)
+
+When a task is too large for one context (multi-file/migration/heavy spec), the
+`large-scope-execute.js` workflow invokes you **in parallel, once per module/chunk**,
+instead of once for the whole task. In this mode your job narrows to **drafting the
+VISION predicate table only** for your assigned module — you are not producing a full
+Implementation Plan:
+
+- **Input**: a single module/chunk scope + the overall goal (not the whole codebase).
+- **Skip Branch Verification (Planning Process step 0)** — the workflow's caller already
+  handled it once before fan-out; running it per parallel worker is redundant.
+- **Skip the full Plan Format** (Overview/Architecture Changes/Implementation Steps/etc.)
+  — output only the conditions relevant to your assigned module, in the schema the
+  workflow requests (id left provisional; the orchestrator renumbers deterministically
+  across all workers afterward — do not worry about ID collisions with sibling workers).
+- Follow the same predicate discipline as the normal Success Criteria table above:
+  ID(provisional)+tag(機械/AI, default 機械)+axis+observable predicate+test approach.
+  Do not invent solutions or write code — this sub-mode is still read-only planning.
+
+This makes you the single author of the predicate table on both paths: the whole-task
+Success Criteria section above for normal-scope work, this fan-out sub-mode for large-A.
 
 ## Best Practices
 
