@@ -1,9 +1,9 @@
 {
-  "backup": ".claude-engineering.backup/20261125T131643682105",
+  "backup": ".claude-engineering.backup/20261125T135632026982",
   "files": {
     "agents/architect.md": "8da2b8a0ff3d3355ea8b0d2168de1b447fca96b5e3e48d4e40e7263f06560fa6",
     "agents/build-error-resolver.md": "3121ff132ada7bd1a6f3902ddc91c229f453c8da65b38f8513322e16825365e6",
-    "agents/deploy-runner.md": "62643173b59570ef215946e95cca32443ab36f733768bd460457c32fa07dd2fe",
+    "agents/deploy-runner.md": "fe6299d15d780d616715123b3c729abaa0010417b6720a2dbef8ccbf4036d297",
     "agents/doc-updater.md": "8eb5ab03115b8d79aceb3fc1b7f67fb53ef21f1bb4785beacf4556caaed93205",
     "agents/e2e-runner.md": "afa2c29ec5bd322137919220ce6ea0a3a09ffbac1b3b0898e4e2c2c12a50d0c1",
     "agents/executor.md": "bcc8d1f63d6fcb3b47c99461f3e331e260f8bc5f68f3f368176b84976c8a60fc",
@@ -82,7 +82,7 @@
     "templates/init-autonomous/rules.md": "2f537f045e34d310ca68d849ce348eac49d53c5a044e7e62c2d7b0feec977ce7",
     "workflows/large-scope-execute.js": "b96a66cec81a44574f675512db5cd2e0ecd147317d812b59de8c310287409987"
   },
-  "installed_at": "2026-11-25T13:16:43.738744",
+  "installed_at": "2026-11-25T13:56:32.069391",
   "pack": "claude-engineering",
-  "revision": "9cbfacc6ae09bf2869b57c1d75a0fa45236b52d3"
+  "revision": "4b7d744e885ce5749952400a9157f208faee66e8"
 }
