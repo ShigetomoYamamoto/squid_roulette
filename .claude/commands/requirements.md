@@ -14,13 +14,20 @@ description: 曖昧な要望を構造化された要件に整理します。requ
 
 ## 次のステップ
 
-要件確定後: `/design`(設計が必要な場合)または `/plan`(既存設計の範囲内)。
+`/autorun` の requirements フェーズとして起動された場合は、承認後 `design`(必要な場合)→`plan`→`tdd`
+へ同一 RUN_STATE のまま自動的に継続する(手動でコマンドを挟む必要はない)。
+
+このコマンドを単体で明示的に呼んだ場合は、要件確定後に `/design`(設計が必要な場合)または `/plan`
+(既存設計の範囲内)へ進む。**そのあとの実装を裸の「実装して」で呼び直さないこと**——スコープ・
+受け入れ基準が引き継がれず、判定がやり直しになる。続けて実装するときは `/autorun` に渡してこの
+内容を full-auto モードの起点として採用させる。
 
 承認された要件は `docs/requirements.md` に永続化される(セッションを跨いで残す正本。requirements-analyst
-自身はWriteツールを持たない読み取り専用エージェントのため、書き込みはオーケストレータが行う — Sonnet主
-ループのままなら直接書き、メインが思考ティア(Opus/Fable)へエスカレーション中で `opus-execution-guard` に
-ブロックされる場合のみ executor へ委譲する — 詳細は agent 本体「Persist on Approval」)。
+自身はWriteツールを持たない読み取り専用エージェントのため、書き込みは**常に executor へ委譲する** —
+`main-loop-execution-guard` はモデルを問わずメインループの書き込みをブロックするため(ADR-026)、
+オーケストレータが直接書く経路は無い。委譲時は `run_in_background: false` を指定する —
+詳細は agent 本体「Persist on Approval」)。
 
 ## 関連エージェント
 
-`~/.claude/agents/requirements-analyst.md` を起動します(要件をユーザーが承認するまで設計・実装に進みません — 詳細はエージェント本体)。
+`.claude/agents/requirements-analyst.md` を起動します(要件をユーザーが承認するまで設計・実装に進みません — 詳細はエージェント本体)。

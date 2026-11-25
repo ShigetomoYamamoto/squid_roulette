@@ -123,7 +123,7 @@ description: |
 
 | 条件 | 案内する Plugin |
 |-----|--------------|
-| `.github/` を生成する（ほぼ常時） | GitHub Plugin（公式。`/plugin` で導入し `GITHUB_PERSONAL_ACCESS_TOKEN` を設定。[ADR-011](../docs/adr/011-official-github-plugin.md)）|
+| `.github/` を生成する（ほぼ常時） | GitHub Plugin（公式。`/plugin` で導入し `GITHUB_PERSONAL_ACCESS_TOKEN` を設定。[ADR-011](https://github.com/ShigetomoYamamoto/claude-core/blob/main/docs/adr/011-official-github-plugin.md)）|
 | `@supabase/` が依存にある | Supabase Plugin |
 | `vercel.json` または Vercel 関連ファイルがある | Vercel Plugin |
 | 環境変数に `SLACK_` が含まれる | Slack Plugin |
@@ -272,7 +272,7 @@ PYEOF
 ### 4-0. `.claude/settings.json`（プロジェクト固有の権限設定）
 
 検出したスタックに応じて、`auto` モードで確認なしに実行できるコマンドを定義する。
-**git は グローバル設定で `Bash(git *)` / `Bash(gh *)` として許可済みのため含めない。**
+**git / gh の基本操作（status・diff・log・add・commit・checkout・push origin・gh pr create 等）は engineering パックの `settings-fragment.json` が許可済みなので、ここには含めない。許可の範囲は README「権限 (`permissions.allow`) の方針」を参照。**
 
 以下の手順で生成する（複数スタック検出時は `allow` 配列を自動マージ）:
 
@@ -353,7 +353,7 @@ cp がブロックされた場合はユーザーに以下を実行してもら�
 ### 4-1〜4-11. 各種ファイルのテンプレート生成
 
 生成するファイルの中身は、保守性のためカテゴリ別テンプレート集へ外出しした
-（`~/.claude/templates/init-autonomous/`）。各テンプレートを読み、`{{ }}` プレースホルダを
+（`.claude/templates/init-autonomous/`）。各テンプレートを読み、`{{ }}` プレースホルダを
 ステップ1・2の収集情報で置換し、**検出スタックに該当する分だけ**生成する。各カテゴリ内の条件
 （「Laravel 検出時」等）はテンプレート内の見出しに従う。既存ファイルは上書き前に確認する。
 

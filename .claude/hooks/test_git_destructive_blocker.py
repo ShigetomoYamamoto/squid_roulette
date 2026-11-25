@@ -7,15 +7,29 @@ hook は PreToolUse(Bash) で stdin から JSON を受け取り、保護ブラ�
 破壊的な git 操作を exit 2 でブロックする。current_branch() は「git が実際に
 走るディレクトリ」（`git -C <dir>` / 直前の `cd <dir>`）をコマンド文字列から
 推定してそこで評価する（cwd 誤判定バグの修正・本ファイルの主眼）。
+
+加えて BypassGuardTest は、git ネイティブ hook を飛ばす経路（--no-verify・core.hooksPath・
+GIT_CONFIG_*・CLAUDECODE の改変など）が exit 2 で止まり、近傍の正常系・読取系が通ることを検証する。
+
+一時リポを作る git サブプロセスは、利用者の実 git 設定（global の hooksPath や CLAUDECODE=1）の
+影響を受けないよう、空の GIT_CONFIG_GLOBAL と GIT_CONFIG_NOSYSTEM=1 を渡して隔離する。
 """
+import atexit
 import json
 import os
 import shutil
 import subprocess
 import tempfile
 import unittest
+import warnings
 
 HOOK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "git-destructive-blocker.py")
+
+_CFG_DIR = tempfile.mkdtemp(prefix="gdb_cfg_")
+atexit.register(shutil.rmtree, _CFG_DIR, ignore_errors=True)
+_EMPTY_CFG = os.path.join(_CFG_DIR, "gitconfig")
+open(_EMPTY_CFG, "w").close()
+GIT_ENV = {**os.environ, "GIT_CONFIG_GLOBAL": _EMPTY_CFG, "GIT_CONFIG_NOSYSTEM": "1"}
 
 
 def run_hook(command: str, cwd: str) -> int:
@@ -27,12 +41,13 @@ def run_hook(command: str, cwd: str) -> int:
         capture_output=True,
         text=True,
         cwd=cwd,
+        env=GIT_ENV,
     )
     return proc.returncode
 
 
 def _run(args, cwd):
-    subprocess.run(args, cwd=cwd, capture_output=True, text=True, check=True)
+    subprocess.run(args, cwd=cwd, capture_output=True, text=True, check=True, env=GIT_ENV)
 
 
 def init_repo(path: str, branch: str = "main") -> None:
@@ -274,6 +289,486 @@ class GitDestructiveBlockerTest(unittest.TestCase):
         add_worktree(self.repo, worktree_b, "featB")
         exit_code = run_hook(f"cd {self.repo} && cd {worktree_b} && git push", self.repo)
         self.assertEqual(exit_code, 0)
+
+
+class BypassGuardTest(unittest.TestCase):
+    """git ネイティブ hook の迂回経路（文字列ガード）。cwd は非保護ブランチのリポ。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmpdir = tempfile.mkdtemp(prefix="gdb_bypass_")
+        cls.repo = os.path.join(cls.tmpdir, "repo")
+        os.makedirs(cls.repo)
+        init_repo(cls.repo, "main")
+        _run(["git", "checkout", "-b", "feature/x"], cls.repo)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmpdir, ignore_errors=True)
+
+    def blocked(self, command):
+        self.assertEqual(run_hook(command, self.repo), 2, command)
+
+    def allowed(self, command):
+        self.assertEqual(run_hook(command, self.repo), 0, command)
+
+    # --- a. --no-verify / git commit -n ---
+    def test_no_verify_blocked_for_commit_push_merge(self):
+        self.blocked("git commit --no-verify -m x")
+        self.blocked("git push --no-verify origin feature/x")
+        self.blocked("git merge --no-verify topic")
+
+    def test_no_verify_abbreviation_blocked(self):
+        # git は一意な省略形 (--no-verif 等) も受け付ける
+        self.blocked("git commit --no-verif -m x")
+
+    def test_commit_short_n_blocked_alone_and_in_bundles(self):
+        for flags in ("-n -m x", "-nm x", "-anm x", "-an", "-m x -n"):
+            self.blocked(f"git commit {flags}")
+
+    def test_commit_without_n_allowed(self):
+        self.allowed("git commit -am x")
+        self.allowed("git commit --amend --no-edit")
+
+    def test_push_short_n_is_dry_run_allowed(self):
+        self.allowed("git push -n")
+        self.allowed("git push -n origin feature/x")
+
+    def test_log_short_n_allowed(self):
+        self.allowed("git log -n 5")
+        self.allowed("git log --grep commit -n 5")
+
+    # --- b. core.hooksPath / include.path ---
+    def test_hookspath_via_dash_c_blocked(self):
+        self.blocked("git -c core.hooksPath=/dev/null commit -m x")
+        self.blocked('git -c "core.hooksPath=/dev/null" commit -m x')
+        self.blocked("git -c core.hookspath=/dev/null push")
+
+    def test_hookspath_via_config_and_config_env_blocked(self):
+        self.blocked("git config core.hooksPath /dev/null")
+        self.blocked("git config --unset core.hooksPath")
+        self.blocked("git --config-env=core.hooksPath=EVIL commit -m x")
+
+    def test_include_path_via_dash_c_blocked(self):
+        self.blocked("git -c include.path=/tmp/evil.cfg commit -m x")
+
+    def test_hookspath_reads_allowed(self):
+        self.allowed("git config --get core.hooksPath")
+        self.allowed("git config --list")
+        self.allowed("git config --show-origin --get-all core.hooksPath")
+
+    def test_hookspath_with_read_in_other_segment_still_blocked(self):
+        self.blocked("git -c core.hooksPath=/dev/null commit -m x && git config --get user.name")
+
+    def test_unrelated_config_write_allowed(self):
+        self.allowed("git config user.name someone")
+
+    # --- c. claudeguard (per-repo opt-out key) ---
+    def test_claudeguard_write_blocked(self):
+        self.blocked("git config claudeguard.disable true")
+        self.blocked("git config --local claudeguard.disable true")
+        self.blocked("git config --unset claudeguard.disable")
+        self.blocked("git -c claudeguard.disable=true commit -m x")
+
+    def test_claudeguard_read_allowed(self):
+        self.allowed("git config --get claudeguard.disable")
+        self.allowed("git config --local --list")
+
+    # --- d. env tampering ---
+    def test_git_config_env_vars_blocked(self):
+        self.blocked("GIT_CONFIG_GLOBAL=/dev/null git commit -m x")
+        self.blocked("export GIT_CONFIG_NOSYSTEM=1; git status")
+        self.blocked("GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null git commit -m x")
+        self.blocked("GIT_CONFIG_PARAMETERS=\"'core.hooksPath=/dev/null'\" git commit -m x")
+
+    def test_other_git_env_vars_allowed(self):
+        self.allowed("GIT_AUTHOR_NAME=someone git commit -m x")
+        self.allowed("env FOO=1 git status")
+
+    def test_claudecode_tampering_blocked(self):
+        self.blocked("unset CLAUDECODE")  # git を含まないコマンドでも対象
+        self.blocked("env -u CLAUDECODE git commit -m x")
+        self.blocked("env --unset=CLAUDECODE git commit -m x")
+        self.blocked("CLAUDECODE=0 git commit -m x")
+        self.blocked("export CLAUDECODE=")
+
+    def test_env_ignore_environment_with_git_blocked(self):
+        self.blocked("env -i /usr/bin/git commit -m x")
+
+    def test_env_prefix_with_git_interactive_flag_allowed(self):
+        # env の -i (環境消去) と、git 側の -i (rebase -i / grep -i) を混同しない
+        self.allowed("env GIT_SEQUENCE_EDITOR=true git rebase -i HEAD~3")
+        self.allowed("env LC_ALL=C git grep -i x")
+
+    def test_claudecode_reads_allowed(self):
+        self.allowed("echo $CLAUDECODE")
+        self.allowed('[ "$CLAUDECODE" = 1 ] && git status')
+
+    # --- e. send-pack / update-ref ---
+    def test_send_pack_blocked(self):
+        self.blocked("git send-pack origin refs/heads/feature/x")
+
+    def test_update_ref_on_protected_ref_blocked(self):
+        self.blocked("git update-ref refs/heads/main HEAD~1")
+        self.blocked("git update-ref -d refs/heads/develop")
+        self.blocked("git update-ref refs/heads/release/1.0 HEAD")
+
+    def test_update_ref_on_other_refs_allowed(self):
+        self.allowed("git update-ref refs/heads/feature/x HEAD")
+        self.allowed("git update-ref refs/heads/mainline HEAD")
+        self.allowed("git update-ref refs/stash HEAD")
+
+    # --- f. .git/hooks の変更 ---
+    def test_mutating_git_hooks_blocked(self):
+        self.blocked("rm .git/hooks/pre-commit")
+        self.blocked("chmod -x .git/hooks/pre-push")
+        self.blocked("mv .git/hooks/pre-push /tmp/x")
+        self.blocked("ln -sf /dev/null .git/hooks/pre-commit")
+        self.blocked("echo x > .git/hooks/pre-commit")
+        self.blocked("echo x >> .git/hooks/pre-merge-commit")
+        self.blocked("echo x | tee .git/hooks/pre-push")
+        self.blocked("sed -i 's/a/b/' .git/hooks/pre-commit")
+        self.blocked("rm hooks/pre-commit; git status")
+
+    def test_reading_git_hooks_allowed(self):
+        self.allowed("ls .git/hooks")
+        self.allowed("ls .git/hooks 2>/dev/null")
+        self.allowed("cat .git/hooks/pre-commit")
+        self.allowed("head -5 .git/hooks/pre-push")
+        self.allowed("grep -n x .git/hooks/pre-commit")
+        self.allowed("cat .git/hooks/pre-commit > /tmp/copy_of_hook")
+
+    def test_repo_source_hook_dir_not_confused_with_git_hooks(self):
+        # git-hooks/ は hook の配布元ディレクトリ (.git/hooks ではない)
+        self.allowed("cp git-hooks/pre-commit /tmp/x")
+
+    # --- 散文 (コミットメッセージ等) の誤検知回避 ---
+    def test_prose_in_commit_message_allowed(self):
+        self.allowed('git commit -m "docs: explain --no-verify and core.hooksPath"')
+        self.allowed("git commit -m 'explain GIT_CONFIG_GLOBAL and CLAUDECODE=0'")
+        self.allowed('git commit -am "mention -n and rm .git/hooks/pre-commit"')
+
+    def test_prose_in_quoted_heredoc_message_allowed(self):
+        self.allowed(
+            "git commit -m \"$(cat <<'EOF'\n"
+            "docs: explain --no-verify and core.hooksPath\n\n"
+            "GIT_CONFIG_GLOBAL=/dev/null and CLAUDECODE=0 are bypasses; rm .git/hooks/pre-commit\n"
+            "EOF\n)\""
+        )
+
+    def test_prose_in_pr_title_and_body_allowed(self):
+        self.allowed('gh pr create --title "doc git hooks" --body "explains --no-verify"')
+
+    def test_scrub_does_not_hide_flags_after_message(self):
+        self.blocked("git commit -m 'x' --no-verify")
+        self.blocked("git commit -m 'x' -n")
+
+    def test_scrub_does_not_hide_command_after_heredoc(self):
+        self.blocked("git commit -F - <<'EOF'\nmsg\nEOF\ngit commit --no-verify -m y")
+
+    def test_quoted_value_that_is_not_a_message_flag_still_scanned(self):
+        self.blocked('git -c "core.hooksPath=/dev/null" commit -m x')
+
+    def test_mention_inside_unquoted_heredoc_still_blocked_known_limit(self):
+        # 既知の許容: クォート無し heredoc の本文は散文として除外しない
+        self.blocked("git commit -F - <<EOF\nuse --no-verify\nEOF")
+
+    # --- シェルコメント: 末尾コメントの --get/--list で読取扱いにならない ---
+    def test_trailing_comment_does_not_make_write_a_read(self):
+        self.blocked("git config core.hooksPath /dev/null # --get")
+        self.blocked('git config claudeguard.protectedBranches "" # --list')
+        self.blocked("git status\ngit config core.hooksPath x  #--get")
+        self.blocked('git config core.hooksPath /dev/null \\" # --get \\" "')  # \" はクォートを開かない
+
+    def test_comment_does_not_hide_following_lines(self):
+        # `# <<'EOF'` はコメント。heredoc と誤認して次行を散文扱いしてはならない
+        self.blocked("echo hi # <<'EOF'\ngit commit --no-verify -m x\nEOF")
+        # クォートが改行をまたぐ場合も、閉じ引用符の後ろ (--no-verify) をコメント扱いしない
+        self.blocked('git commit -m "a\nb #x" --no-verify')
+
+    def test_hash_inside_quotes_or_words_is_not_a_comment(self):
+        self.allowed('git commit -m "fix #123"')
+        self.allowed('git log --grep="#123" --oneline')
+        self.blocked('git config "core.hooksPath" "/x #y" --unset')  # クォート内の # は残る
+
+    def test_bypass_words_inside_comment_allowed(self):
+        self.allowed("git status # explains --no-verify, core.hooksPath and CLAUDECODE=0")
+        self.allowed("# git config core.hooksPath /dev/null\ngit status")
+
+    # --- CLAUDECODE の代入はコマンド境界だけ (引数内の言及は誤検知しない) ---
+    def test_claudecode_assignment_at_command_boundary_blocked(self):
+        for cmd in ("CLAUDECODE=0 git commit -m x", "FOO=1 CLAUDECODE=0 git commit -m x",
+                    'FOO="a b" CLAUDECODE=0 git commit -m x', "echo hi; CLAUDECODE=0 git commit -m x",
+                    "true && CLAUDECODE=0 git commit -m x", "echo a\nCLAUDECODE=0 git commit -m x",
+                    "(CLAUDECODE=0 git commit -m x)", "{ CLAUDECODE=0 git commit -m x; }",
+                    "env CLAUDECODE=0 git commit -m x", "env -u FOO CLAUDECODE=0 git commit -m x",
+                    "export FOO=1 CLAUDECODE=0", "export CLAUDECODE=", "declare -x CLAUDECODE=0",
+                    'bash -c "CLAUDECODE=0 git commit -m x"', "env -u CLAUDECODE git commit -m x",
+                    "unset CLAUDECODE"):
+            self.blocked(cmd)
+
+    def test_claudecode_mentioned_as_argument_allowed(self):
+        self.allowed('grep -rn "CLAUDECODE=1" .')
+        self.allowed("echo CLAUDECODE=1")
+        self.allowed("git grep -n CLAUDECODE=1")
+        self.allowed("printf 'CLAUDECODE=%s' 1")
+        self.allowed("ls -la; grep -c CLAUDECODE=1 notes.txt")
+
+    # --- core.hooksPath / include.path / claudeguard は git config / -c を呼ぶセグメントだけ ---
+    def test_key_mention_without_git_config_allowed(self):
+        self.allowed("git grep -n core.hooksPath")
+        self.allowed("grep -rn core.hooksPath git-hooks/")
+        self.allowed("git grep -c claudeguard")
+        self.allowed("git --no-pager grep -n include.path")
+        self.allowed("git log --grep=claudeguard --oneline")
+        self.allowed("git config --list | grep core.hooksPath")
+
+    def test_git_config_without_value_is_read(self):
+        self.allowed("git config core.hooksPath")
+        self.allowed("git config --local core.hooksPath")
+        self.allowed("git config core.hooksPath 2>/dev/null || true")
+        self.allowed("git config core.hooksPath > /tmp/out")
+        self.allowed("git config get core.hooksPath")
+        self.allowed("git config get --all claudeguard.protectedBranches")
+        self.allowed("git config list")
+
+    def test_git_config_with_value_or_write_syntax_blocked(self):
+        for cmd in ("git config core.hooksPath x", "git config core.hooksPath /dev/null",
+                    "git config claudeguard.protectedBranches ''", 'git config claudeguard.protectedBranches ""',
+                    "git config core.hooksPath '>'", "git config core.hooksPath > /tmp/out /dev/null",
+                    "git config set core.hooksPath x", "git config unset core.hooksPath",
+                    "git config --remove-section claudeguard", "git config --unset-all core.hooksPath",
+                    "git -c core.hooksPath=/dev/null commit -m x", "/usr/bin/git -c core.hooksPath=/dev/null commit",
+                    "git --no-pager -c claudeguard.x=1 log", "git commit --no-verify", "git commit -nm x",
+                    "git send-pack origin x", "rm .git/hooks/pre-commit"):
+            self.blocked(cmd)
+
+    # --- git diff/log/show --output (任意ファイルへ書込める) ---
+    def test_output_option_of_diff_log_show_blocked(self):
+        self.blocked("git log --format=%s --output=/tmp/x")
+        self.blocked("git diff --output=.git/hooks/pre-commit")
+        self.blocked("git show --output /tmp/x HEAD")
+        self.blocked("git -C . log --output=f")
+
+    def test_similar_output_options_allowed(self):
+        self.allowed("git diff --output-indicator-new=+ --output-indicator-old=-")
+        self.allowed("git log --output-indicator-context=x --oneline")
+        self.allowed("git log --format=%s > /tmp/out.txt")
+        self.allowed("git log --oneline | tee /tmp/out.txt")
+
+    # --- h. リモートヘルパーのプログラム実行オプション (--upload-pack / --receive-pack / --exec) ---
+    def test_remote_helper_program_options_blocked(self):
+        for cmd in ("git fetch origin --upload-pack=x", "git fetch origin --upload-pack x",
+                    "git pull origin --upload-pack=x", "git pull --upload-pack x origin",
+                    "git push origin --receive-pack=x", "git push origin --receive-pack x",
+                    "git push origin --exec=x", "git push origin --exec x",
+                    "git push origin feature/x --exec=x",
+                    "git ls-remote --upload-pack=x origin", "git ls-remote --upload-pack x origin",
+                    "git ls-remote --exec=x origin", "git ls-remote origin --exec x",
+                    "git clone --upload-pack=x https://example.com/r.git",
+                    "git clone --upload-pack x https://example.com/r.git",
+                    "git -C . fetch origin --upload-pack=x", "/usr/bin/git fetch origin --upload-pack=x",
+                    "git archive --remote=origin --exec=x HEAD", "git push origin '--exec=x'"):
+            self.blocked(cmd)
+
+    def test_remote_helper_option_abbreviations_blocked(self):
+        # git は曖昧でない省略形を受理する (実測: push --e/--exe、fetch --upl、ls-remote --u、push --rece)
+        for cmd in ("git push origin --e x", "git push origin --exe=x", "git fetch origin --upl=x",
+                    "git pull origin --upload x", "git ls-remote --u x origin", "git push origin --rece=x",
+                    "git clone --upl x https://example.com/r.git",
+                    "git clone -u x https://example.com/r.git", "git clone -qu x https://example.com/r.git"):
+            self.blocked(cmd)
+
+    def test_exec_path_assignment_blocked_but_read_allowed(self):
+        self.blocked("git --exec-path=/tmp/x status")
+        self.blocked("git -C . --exec-path=/tmp/x status")
+        self.allowed("git --exec-path")
+
+    def test_remote_helper_option_neighbours_allowed(self):
+        for cmd in ("git fetch origin --prune", "git push origin --force-with-lease feature/x",
+                    "git push -u origin feature/x", "git push origin --recurse-submodules=check",
+                    "git ls-remote --exit-code origin", "git ls-files --exclude=x",
+                    "git clone --recursive https://example.com/r.git",
+                    "git clone -q -b main https://example.com/r.git",
+                    "git rebase --exec true main"):  # push/fetch 系以外の --exec (ローカル) は対象外
+            self.allowed(cmd)
+
+    def test_remote_helper_option_prose_allowed(self):
+        self.allowed('git commit -m "docs: git fetch origin --upload-pack=x runs a program"')
+        self.allowed(
+            "git commit -m \"$(cat <<'EOF'\n"
+            "fix: block --upload-pack, --receive-pack and --exec\n\n"
+            "git push origin --exec=x and git --exec-path=/tmp/x are examples\n"
+            "EOF\n)\""
+        )
+
+    def test_fetch_pack_and_upload_archive_blocked(self):
+        for cmd in ("git fetch-pack --upload-pack=x origin", "git fetch-pack --exec=x origin",
+                    "git-fetch-pack --upload-pack x origin", "git -C . fetch-pack --upl=x origin",
+                    "git upload-archive --exec=x repo", "git -C . upload-archive --exec x repo"):
+            self.blocked(cmd)
+
+    def test_fetch_pack_and_upload_archive_neighbours_allowed(self):
+        for cmd in ("git fetch-pack --all origin", "git fetch-pack --stdin --thin origin",
+                    "git upload-archive repo"):
+            self.allowed(cmd)
+
+    def test_option_hidden_behind_flag_value_blocked(self):
+        # fetch/ls-remote の -t/-m/-b は真偽値の旗 (値を取らない)。直後のクォート値は散文ではなく引数
+        for cmd in ('git fetch origin -t "--upload-pack=x"', "git fetch origin -t '--exec=x'",
+                    'git fetch -m "--upload-pack=x" origin', 'git ls-remote -b "--upload-pack=x" origin',
+                    'git pull origin -t --upload-pack="x"', 'git fetch origin -t "--upl=x" && echo ok',
+                    'git "fetch" origin -t "--upload-pack=x"', 'git f\\etch origin -t "--upload-pack=x"',
+                    'git commit -m "a" && git fetch origin -t "--exec=x"'):
+            self.blocked(cmd)
+
+    def test_option_hidden_behind_flag_value_neighbours_allowed(self):
+        self.allowed('git fetch origin -t "v1.0"')
+        self.allowed('git commit -m "docs: mention --upload-pack"')
+        self.allowed('git commit -m "x"')
+        # 旗の値は旗どうしの間の文だけで判定する (手前の -m の中身や `;` の前の fetch に引きずられない)
+        self.allowed('git commit -m "fix: guard git fetch options" -m "blocks git push origin --exec=x"')
+        self.allowed('git fetch origin; git commit -m "docs: git push origin --exec=x"')
+        self.allowed('gh pr create --title "block git push --exec" --body "git fetch origin --upload-pack=x is blocked"')
+        self.allowed('git fetch origin && git commit -m "docs: git fetch origin --upload-pack=x is blocked"')
+        self.allowed(
+            "git commit -m \"$(cat <<'EOF'\n"
+            "docs: mention --upload-pack\n"
+            "EOF\n)\""
+        )
+
+    def test_quote_split_remote_helper_option_blocked(self):
+        for cmd in ('git push origin --rec"eive-pack=x"', "git fetch origin --'upload-pack'=x",
+                    "git push origin --exec\\=x", 'git fetch origin --"upl"oad-pack x',
+                    'git fetch origin "--upload-pack=x"', 'git clone "-u" x https://example.com/r.git',
+                    "git push origin --e''xec x"):
+            self.blocked(cmd)
+
+    def test_quote_split_remote_helper_option_neighbours_allowed(self):
+        for cmd in ("git fetch origin -- upload-pack", 'git fetch origin -- "upload-pack"',
+                    'git fetch origin "feature x"', 'git push origin "feature/x"',
+                    'git commit -m "x" -q', 'git commit -m "run: a" -m "b: c"'):
+            self.allowed(cmd)
+
+    # --- curl / wget の出力先が保護対象 (.git/ .claude/) ---
+    def test_curl_wget_output_to_protected_path_blocked(self):
+        for cmd in ("curl -sS --max-time 5 -o .claude/hooks/git-destructive-blocker.py -w '%{http_code}' https://x.example/",
+                    "curl -sS --max-time 5 -o ./.git/hooks/pre-commit -w x https://x.example/",
+                    "curl -sSo .claude/settings.json https://x.example/",
+                    "curl --output=.claude/settings.json https://x.example/",
+                    "curl --output .git/config https://x.example/", "curl -o.claude/settings.json https://x.example/",
+                    "curl -sS -o '.claude/hooks/x.py' https://x.example/", 'curl -o "$HOME/.claude/settings.json" https://x.example/',
+                    "curl -O --output-dir .claude/hooks https://x.example/a.py", "/usr/bin/curl -o .git https://x.example/",
+                    "wget -O .claude/settings.json https://x.example/", "wget -qO.git/hooks/pre-push https://x.example/",
+                    "wget --output-document=.git/config https://x.example/", "wget -P .claude/hooks https://x.example/a.py",
+                    "code=$(curl -sS --max-time 5 -o .claude/settings.json -w '%{http_code}' https://x.example/)",
+                    "(curl -sSo .git/hooks/pre-commit https://x.example/)", "curl -sSo .Claude/settings.json https://x.example/",
+                    "curl -sS -w '%output{.claude/settings.json}x' https://x.example/",
+                    "bash -c \"curl -sS -o .claude/settings.json https://x.example/\""):
+            self.blocked(cmd)
+
+    def test_curl_wget_output_elsewhere_allowed(self):
+        for cmd in ("curl -sS --max-time 10 -o /tmp/body.txt -w '%{http_code}' https://x.example/",
+                    "curl -sS --head --max-time 5 -o /dev/null -w '%{http_code} %{content_type}' https://x.example/",
+                    "curl -sS --max-time 10 -o /tmp/b -w x https://x.example/.claude/foo",
+                    "curl -sS https://x.example/.git/config", "curl -sSo /tmp/o.json https://x.example/",
+                    "curl --output=/tmp/o.json https://x.example/", "wget -O /tmp/x https://x.example/.claude/y",
+                    "wget -qO- https://x.example/", "curl -sS -o .github/x.txt https://x.example/",
+                    "curl -sS -o .gitignore.bak https://x.example/", "curl -sS -o my.claude/x https://x.example/",
+                    "code=$(curl -sS --max-time 5 -o /tmp/b -w '%{http_code}' https://x.example/)",
+                    "curl -sS -w '%output{/tmp/o.txt}x' https://x.example/",
+                    'git commit -m "docs: curl -o .claude/settings.json is blocked"'):
+            self.allowed(cmd)
+
+    # --- find -delete での .git/hooks 削除 ---
+    def test_find_delete_in_git_hooks_blocked(self):
+        self.blocked("find .git/hooks -type f -delete")
+        self.blocked("find .git/hooks -exec rm {} +")
+        self.allowed("find .git/hooks -type f")
+
+    # --- 引用符・\ で分けた --no-verify / --output / .git/hooks の変更 ---
+    def test_quote_split_bypass_blocked(self):
+        for cmd in ('git commit "--no-ver""ify" -m x', "git commit --no-ver\\ify -m x",
+                    "git push '--no-verify'", "git commit '-n' -m x",
+                    'git commit -m x "--no-verify"', 'GIT_X=1 git commit --no-ver""ify',
+                    'git diff "--out""put=.git/hooks/pre-commit"',
+                    'cp x ".git/""hooks/pre-commit"',
+                    '"g"it commit "--no-ver""ify" -m x', "g\\it commit --no-ver\\ify -m x"):
+            self.blocked(cmd)
+
+    def test_quote_strip_no_new_false_positives(self):
+        for cmd in ('git commit -m "explain why --no-verify is banned"', "git commit -m 'n'",
+                    "git commit -F msg.txt", "git diff --stat", "git log --oneline -3", "cp a.txt b.txt",
+                    "curl -sS --max-time 10 -o /tmp/body.html -w '%{http_code}' https://example.workers.dev/"):
+            self.allowed(cmd)
+
+    # --- 回帰: 散文の除去が shell -c の文字列を隠さない (bash -ct の -t を -t 旗と誤認していた) ---
+    def test_scrub_does_not_hide_shell_c_string_after_bundled_flag(self):
+        for cmd in ('bash -ct "git commit --no-verify -m x"', "bash -ct 'git push --no-verify origin feature/x'",
+                    'sh -cm "git commit -n -m x"', 'zsh -cb "git -c core.hooksPath=/dev/null commit -m x"',
+                    'ssh host -t "git commit --no-verify -m x"', 'watch -t "git commit --no-verify -m x"',
+                    'git status && bash -ct "git commit --no-verify -m x"',
+                    'git commit -m "a" && bash -ct "git commit --no-verify -m x"',
+                    # git が同じセグメントの手前にあっても、間にシェル・eval 類があれば git の旗ではない
+                    'git bisect run sh -ct "git commit --no-verify -m x"',
+                    'git status $(bash -ct "git commit --no-verify -m x")',
+                    # 先頭語が git/gh でなければ散文として除かない (インタプリタ名の一覧には頼らない)
+                    "$SHELL -ct 'git push --force origin main'", '/bin/zsh -ct "git push --force origin main"',
+                    'sudo git commit -m "x --no-verify"', 'env X=1 git commit -m "x --no-verify"',
+                    'xargs git commit -m "x --no-verify"',
+                    # 二重引用符内のコマンド置換は実行される
+                    'git commit -m "$(git push --force origin main)"', 'git commit -m `git push -f origin main`',
+                    'git commit -m "$(git commit --no-verify -m x)"', 'git commit -m "${x:-$(git commit -n -m y)}"'):
+            self.blocked(cmd)
+
+    def test_scrub_still_hides_git_gh_message_values(self):
+        for cmd in ('git commit -m "docs: explain why --no-verify is forbidden"',
+                    'git commit -m "a" -m "docs: why --no-verify is forbidden"',
+                    'git -C . commit -am "docs: why --no-verify is forbidden"',
+                    'git status && git commit -m "docs: why --no-verify is forbidden"',
+                    'gh pr create --title "t" --body "docs: why --no-verify is forbidden"',
+                    "cd repo && git commit -m 'note about --force'",
+                    'gh pr create --base develop -t "x" -b "mentions --no-verify"',
+                    'git commit -m "docs: $HOME and \\$(x) are expanded in messages"',
+                    'GIT_AUTHOR_NAME=x /usr/bin/git commit -m "docs: why --no-verify is forbidden"'):
+            self.allowed(cmd)
+
+    # --- 回帰: git config の読取判定が入れ子・-c 付きで fail-open にならない ---
+    def test_global_dash_c_hookspath_blocked_even_with_nested_or_read_config(self):
+        for cmd in ("git -c core.hooksPath=/tmp/x commit -m wip $(git config --list)",
+                    "git -c core.hooksPath=/tmp/x commit -m wip `git config --list`",
+                    "git -c core.hooksPath=/tmp/x config --get user.name",
+                    "git --config-env=core.hooksPath=EVIL config --list",
+                    "git -c include.path=/tmp/e.cfg config --list",
+                    "git -c claudeguard.disable=true config --get user.name",
+                    "git config core.hooksPath /tmp/x $(git config --list)",
+                    "git config core.hooksPath /tmp/x `git config --get user.name`"):
+            self.blocked(cmd)
+
+    def test_plain_config_reads_still_allowed(self):
+        for cmd in ("git config --get core.hooksPath", "git config --list", "git config core.hooksPath",
+                    "git config --show-origin --get-all core.hooksPath", "git config get core.hooksPath",
+                    "git -C . config --get claudeguard.disable", "git -c user.name=x log"):
+            self.allowed(cmd)
+
+    # --- sh -c "git ..." の保護ブランチ判定 (開き引用符で git 呼び出しが見えなかった) ---
+    def test_force_push_to_protected_branch_via_shell_c_blocked(self):
+        for cmd in ("bash -c 'git push --force origin main'", 'sh -c "git push -f origin master"',
+                    "bash -ct 'git push --force origin main'", "/bin/bash -c 'git push origin --delete main'"):
+            self.blocked(cmd)
+
+    def test_shell_c_without_protected_target_or_git_allowed(self):
+        for cmd in ('bash -c "git push --force origin feature/x"', 'bash -c "git status"',
+                    'echo "git push --force origin main"'):
+            self.allowed(cmd)
+
+    # --- hook 自体のソースに不正なエスケープ等の警告が無い (毎回 stderr に SyntaxWarning が出る回帰防止) ---
+    def test_hook_source_compiles_without_warnings(self):
+        with open(HOOK, encoding="utf-8") as f:
+            source = f.read()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            compile(source, HOOK, "exec")
 
 
 if __name__ == "__main__":

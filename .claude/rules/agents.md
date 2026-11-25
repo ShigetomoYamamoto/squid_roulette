@@ -21,11 +21,7 @@ These agents MUST be invoked automatically — without waiting for the user to a
 
 | Trigger | Agent to invoke |
 |---------|----------------|
-| User provides a free-form goal / new feature idea (full-auto mode start) | **requirements-analyst** — structure requirements before design |
-| User provides a specific task / GitHub Issue / bug report (support mode start) | **task-analyst** — break down into implementable units before planning |
-| New project, or feature requires new DB schema / API contract / tech stack decision | **architect** — requirements definition → design → ADR before anything else |
-| Implementing a feature within an existing, defined design | **planner** — implementation plan before writing code |
-| Fixing a bug or implementing a new feature | **tdd-guide** — enforce tests-first |
+| Any request to build, fix, or change code — free-form goal, specific task/Issue/bug report, or a bare "実装して/直して" — explicit or bare, any phrasing | **the single entry (`/autorun`)** — decides sizing (A/B/C) once and connects requirements-analyst → task-analyst → architect → planner → tdd-guide as phases of the same run. None of these five agents is independently proactively triggered by user phrasing anymore — they only run when the single entry invokes them as a phase part (see `docs/autorun-flow.md` "Sizing" and ADR-025) |
 | Any code has been written or modified | **code-reviewer**（公式 `pr-review-toolkit` プラグイン提供）— review immediately after |
 | Code touches auth, user input, secrets, or API endpoints | **security-reviewer** — review before committing (in addition to code-reviewer) |
 | Build or type errors occur | **build-error-resolver** — fix before continuing |
@@ -33,12 +29,12 @@ These agents MUST be invoked automatically — without waiting for the user to a
 | Ready to deploy after PR merge | **deploy-runner** — deploy + verify + auto-rollback on failure |
 | Manual rollback needed after a previous deploy | **rollback-runner** — revert to a previous version |
 | PR has reviewer comments that need addressing | **review-responder** — implement requested changes and reply |
-| Main loop has escalated to a thinking-tier model (Fable/Opus) and needs VCS/release ops (commit/push/PR/branch/merge) but is blocked by opus-execution-guard | **git-runner** — delegate the git/gh execution (Sonnet; passes the agent_id gate) |
-| Main loop has escalated to a thinking-tier model (Fable/Opus) and needs a generic edit / Bash that no specialist owns but is blocked by opus-execution-guard | **executor** — residual execution worker (Sonnet) |
+| Main loop needs VCS/release ops (commit/push/PR/branch/merge) — blocked by main-loop-execution-guard on every model, not only the thinking tier (ADR-026) | **git-runner** — delegate the git/gh execution (Sonnet; passes the agent_id gate; pass `run_in_background: false`) |
+| Main loop needs a generic edit / Bash that no specialist owns — blocked by main-loop-execution-guard on every model (ADR-026) | **executor** — residual execution worker (Sonnet; pass `run_in_background: false`) |
 
-> 自走時（`/autorun`）は `.claude/docs/autorun-flow.md` の遷移に従い、各エージェントがフェーズとして連結起動される（requirements→requirements-analyst, analyze-task→task-analyst, design→architect, plan→planner, tdd→loop-engineering, verify→/review-loop, deploy→deploy-runner 等）。上表のトリガー（コード変更時の即時レビュー等）はフェーズ内でなお有効。`/autorun --vibing` 時は方向ゲート（要件・条件付き設計）と巻き戻し不能操作以外の事前確認が外れる（[ADR-015](../docs/adr/015-vibing-mode.md)）が、各フェーズのエージェント連結とトリガーは同じ。
+> 自走時（`/autorun`）は `.claude/docs/autorun-flow.md` の遷移に従い、各エージェントがフェーズとして連結起動される（requirements→requirements-analyst, analyze-task→task-analyst, design→architect, plan→planner, tdd→tdd-guide(述語はplanner供給、大規模はworkflow`large-scope-execute.js`), verify→/review-loop, deploy→deploy-runner 等）。上表のトリガー（コード変更時の即時レビュー等）はフェーズ内でなお有効。`/autorun --vibing` 時は方向ゲート（要件・条件付き設計）と巻き戻し不能操作以外の事前確認が外れる（[ADR-015](https://github.com/ShigetomoYamamoto/claude-core/blob/main/docs/adr/015-vibing-mode.md)）が、各フェーズのエージェント連結とトリガーは同じ。
 
-> **公式プラグインへの委譲（2026-06-19〜・[ADR-012](../docs/adr/012-official-plugins-for-git-review-security.md)）:** 「危険操作は hooks で決定的に制御／振る舞いは公式に寄せる」方針。コードレビューは公式 `pr-review-toolkit`（`code-reviewer` ほか専門エージェント群）、コミット/ブランチ掃除は公式 `commit-commands`（`/commit-commands:commit`・`clean_gone`）、セキュリティは公式 `security-guidance`（編集時警告＋commit時LLMレビュー）に委譲。一方 `security-reviewer`・`reviewer`・`fixer`・`/create-pr` は公式に同等品が無い（または develop ベース強制 hook と衝突する）ため**自作を維持**する。危険操作の確定的ブロックは hooks（`git-destructive-blocker`・`pr-base-checker`・`git-add-secret-blocker`・`commit-msg-convention` ほか）が担う。
+> **公式プラグインへの委譲（2026-06-19〜・[ADR-012](https://github.com/ShigetomoYamamoto/claude-core/blob/main/docs/adr/012-official-plugins-for-git-review-security.md)）:** 「危険操作は hooks で決定的に制御／振る舞いは公式に寄せる」方針。コードレビューは公式 `pr-review-toolkit`（`code-reviewer` ほか専門エージェント群）、コミット/ブランチ掃除は公式 `commit-commands`（`/commit-commands:commit`・`clean_gone`）、セキュリティは公式 `security-guidance`（編集時警告＋commit時LLMレビュー）に委譲。一方 `security-reviewer`・`reviewer`・`fixer`・`/create-pr` は公式に同等品が無い（または develop ベース強制 hook と衝突する）ため**自作を維持**する。危険操作の確定的ブロックは hooks（`git-destructive-blocker`・`pr-base-checker`・`git-add-secret-blocker`・`commit-msg-convention` ほか）が担う。
 
 > **物理層(hooks)のスコープ(過大に言わない・ADR-014):** hooks は **Bash 経由の git/PR と Edit/Write にのみ**作動する(settings の matcher が `Bash` / `Edit|Write|MultiEdit`)。**MCP 経由の push/PR(`mcp__plugin_github_github__create_pull_request` 等)・deploy/migrate/rollback コマンドには作動しない**。だから push/PR は `gh` CLI(Bash)に限定し、deploy/migrate/rollback の不可逆停止は「ゲート＋手続き」で担保する(物理層なし)。手続きだけの停止を「hooks が守る」と過信しないこと。
 

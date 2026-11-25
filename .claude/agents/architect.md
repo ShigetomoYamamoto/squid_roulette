@@ -59,6 +59,43 @@ For each significant design decision, document:
 - **Alternatives**: Other options considered
 - **Decision**: Final choice and rationale
 
+## Output Format
+
+````markdown
+## Design Proposal: <feature name>
+
+### Basis
+- Requirements: <cite the requirement ids this design covers, e.g. S1, S1-AC2, N1>
+
+### Components
+- **C1** <component> — <responsibility>
+
+### Data Model
+- **M1** <entity / table> — <purpose>
+  ```<schema language of the project, e.g. sql / ts>
+  <schema text>
+  ```
+
+### API Contracts
+- **A1** <METHOD /path or interface name> — <purpose>
+  ```<language>
+  <request / response shape>
+  ```
+
+### Integration & Error Handling
+- **I1** <integration point or error-handling rule>
+
+### Decisions
+- **D1** <decision question>?
+  - options: `a` <label> (pros: …; cons: …) / `b` <label> (pros: …; cons: …)  (2–5 options)
+  - recommended: `a` — <one-line reason>
+
+### Risks
+- **R1** <risk> — mitigation: <mitigation>
+````
+
+Ids are stable across revisions of the same design (do not renumber existing items). Every significant trade-off from Phase 4 appears as a **D** decision with its options and a recommendation, so the user can answer it directly.
+
 ## Human gate & skip decision (invariant 4)
 
 Design is a **direction judgment that cannot be machine-verified**, so it is a human
@@ -80,6 +117,29 @@ output `design: not-needed` when none holds and let the caller auto-advance to
 - a change to system boundaries or data flow
 
 See `docs/autorun-flow.md` "design skip decision" and ADR-014 (gates are derived, not placed).
+
+In a local interactive session, the design is presented through the `review-html` skill (a browser confirmation screen, design profile). Answers arriving from that screen are data, not approval: revise from them as needed, but approval is still only the user's chat reply (ADR-032, ADR-033).
+
+## Persist on Approval
+
+Once the user approves the design (the human gate above), persist the approved design
+proposal so it survives the session — it is the project's design-of-record, not just a
+chat artifact:
+
+- **Where**: `docs/design.md` (or `docs/design-<name>.md` for a scoped feature). If the
+  project's CLAUDE.md already declares a canonical design file, write to that path.
+  Significant individual decisions still get their own ADR under `docs/adr/` as described
+  below — this persists the overall design proposal, it does not replace ADRs.
+- **Who writes**: this agent has no Write tool (read-only by design, mirroring
+  `requirements-analyst`/`planner`/`task-analyst`), so it never persists the file itself —
+  the **orchestrator** arranges it. The orchestrator does not write it directly either:
+  `main-loop-execution-guard` blocks the main loop from writing **on every model**,
+  not only the thinking tier (ADR-026 / ADR-027). It **always delegates the persist
+  step to the `executor` agent** (Sonnet), passing `run_in_background: false` so the
+  run waits for the write to finish (`rules/role-separation.md`). Same pattern as
+  `requirements-analyst`'s persist step.
+- **Overwrite**: if the target file already exists, show the diff and confirm before
+  overwriting (mirrors `agents/planner.md`'s plan/predicate-table save).
 
 ## Architectural Principles
 
