@@ -19,6 +19,32 @@
       {
         "hooks": [
           {
+            "command": "python3 /private/tmp/claude-501/-Users-shigetomo-yamamoto--workops/ebca55fb-f6e6-4e7f-a58e-a107d6f4f007/scratchpad/squid-wt/.claude/hooks/protected-branch-edit-guard.py",
+            "type": "command"
+          }
+        ],
+        "matcher": "Edit|Write|MultiEdit"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 /private/tmp/claude-501/-Users-shigetomo-yamamoto--workops/ebca55fb-f6e6-4e7f-a58e-a107d6f4f007/scratchpad/squid-wt/.claude/hooks/git-destructive-blocker.py",
+            "type": "command"
+          },
+          {
+            "command": "python3 /private/tmp/claude-501/-Users-shigetomo-yamamoto--workops/ebca55fb-f6e6-4e7f-a58e-a107d6f4f007/scratchpad/squid-wt/.claude/hooks/pr-base-checker.py",
+            "type": "command"
+          },
+          {
+            "command": "python3 /private/tmp/claude-501/-Users-shigetomo-yamamoto--workops/ebca55fb-f6e6-4e7f-a58e-a107d6f4f007/scratchpad/squid-wt/.claude/hooks/commit-msg-convention.py",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      },
+      {
+        "hooks": [
+          {
             "command": "python3 /Users/shigetomo-yamamoto/personal-development/squid_roulette/.claude/hooks/protected-branch-edit-guard.py",
             "type": "command"
           }
@@ -75,9 +101,7 @@
       "Bash(gh issue list *)",
       "Bash(gh run watch *)",
       "Bash(gh run view *)",
-      "Bash(gh run list *)",
-      "Bash(curl -sS --max-time * -o * -w *)",
-      "Bash(curl -sS --head --max-time * -o /dev/null -w *)"
+      "Bash(gh run list *)"
     ],
     "deny": [
       "Bash(curl * -d*)",
@@ -90,7 +114,11 @@
       "Bash(curl * -X*)",
       "Bash(curl * --request*)",
       "Bash(curl * -K*)",
-      "Bash(curl * --config*)"
+      "Bash(curl * --config*)",
+      "Bash(curl *@*)",
+      "Bash(curl *$(*)*)",
+      "Bash(curl *`*)",
+      "Bash(curl *..*)"
     ]
   }
 }
