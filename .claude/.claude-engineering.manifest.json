@@ -1,5 +1,5 @@
 {
-  "backup": ".claude-engineering.backup/20261125T135632026982",
+  "backup": ".claude-engineering.backup/20261125T141629083871",
   "files": {
     "agents/architect.md": "8da2b8a0ff3d3355ea8b0d2168de1b447fca96b5e3e48d4e40e7263f06560fa6",
     "agents/build-error-resolver.md": "3121ff132ada7bd1a6f3902ddc91c229f453c8da65b38f8513322e16825365e6",
@@ -46,10 +46,10 @@
     "docs/engineering-architecture.md": "6b7188bf1022350b50ce95db58378501a52d021b6b035a00729be2657520a028",
     "hooks/commit-msg-convention.py": "ce4638d382345aba5bbfcf7ba6af082d0638d0d643ba0ba873b408944246b39e",
     "hooks/git-destructive-blocker.py": "343f34023cb76a64bcf8e4c94855715f615ef6dc81050e28c64d7659a13961e7",
-    "hooks/pr-base-checker.py": "ad2ec9964ac3277339834fdab088ea541c8a539f24d858737aff4876f1fb07ff",
+    "hooks/pr-base-checker.py": "868920474d09a0769298ba2073d068e31f9cf07cd1c13d514d2639bb83d750a7",
     "hooks/protected-branch-edit-guard.py": "87a73feab6b41849964eb43f8a56c1fab039c7ef2efbac56dbf5e1ece37c9e6c",
     "hooks/test_git_destructive_blocker.py": "c8d55fd299705ede2fbe341d21e7b4043f5299049adc0ba5fb176a58535b5c3b",
-    "hooks/test_pr_base_checker.py": "5e412e3db3797d0097c50736ed7ef4e34dcbbcdf2948a077a2cad65c1b4d19b0",
+    "hooks/test_pr_base_checker.py": "149ac1bebc6cc33a575babb34456fa818bd09c08058b2493f07dfcc643182671",
     "hooks/test_protected_branch_edit_guard.py": "c6873c22adbf2b58ba310241040c7a92a5dd755aa6c555d83f62310660b4dbe8",
     "rules/agents.md": "a63ee11ef8c505a86950cd97f70d66b88c8aa3a5e77bd693abee14716ae1b638",
     "rules/coding-security.md": "e00a7a55be7c0a317c48ae86bd7b928033b63b244d896fb3cac1a660db4dabb3",
@@ -82,7 +82,7 @@
     "templates/init-autonomous/rules.md": "2f537f045e34d310ca68d849ce348eac49d53c5a044e7e62c2d7b0feec977ce7",
     "workflows/large-scope-execute.js": "b96a66cec81a44574f675512db5cd2e0ecd147317d812b59de8c310287409987"
   },
-  "installed_at": "2026-11-25T13:56:32.069391",
+  "installed_at": "2026-11-25T14:16:29.117838",
   "pack": "claude-engineering",
-  "revision": "4b7d744e885ce5749952400a9157f208faee66e8"
+  "revision": "b0de9b0ec459330472dc3aaca95fcd5a60c195a7"
 }
